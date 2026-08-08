@@ -3607,6 +3607,13 @@ namespace TrainingHub.GeneratedClients
         public System.Guid TrainerId { get; set; } = default!;
 
         /// <summary>
+        /// That trainer's name, or `null` when no trainer answers to that identifier
+        /// <br/>any more.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("trainerName")]
+        public string? TrainerName { get; set; } = default!;
+
+        /// <summary>
         /// The training's title.
         /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("title")]

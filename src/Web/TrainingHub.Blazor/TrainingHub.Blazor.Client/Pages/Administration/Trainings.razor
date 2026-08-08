@@ -1,0 +1,224 @@
+@page "/administration/trainings"
+@attribute [Authorize(Roles = "Administrator")]
+@using TrainingHub.Blazor.Client.Infrastructure
+@using TrainingHub.GeneratedClients
+@inject IAdministrationClient AdministrationClient
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="my-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Trainings</MudText>
+
+    <MudPaper Elevation="0" Class="pa-4 mb-4">
+        @* One filter where the trainers' screen has two. A title is value-converted, so EF Core
+           cannot look inside it and the API publishes no term for this list (ADR 0055). A search
+           box that went nowhere would be worse than its absence. *@
+        <MudSelect T="string"
+                   Label="State"
+                   Value="@_status"
+                   ValueChanged="OnStatusChangedAsync"
+                   Clearable="true"
+                   Variant="Variant.Outlined"
+                   Dense="true"
+                   Style="max-width: 16rem;">
+            <MudSelectItem T="string" Value="@PublishedStatus">Published</MudSelectItem>
+            <MudSelectItem T="string" Value="@UnpublishedStatus">Unpublished</MudSelectItem>
+            <MudSelectItem T="string" Value="@WithheldStatus">Withheld</MudSelectItem>
+        </MudSelect>
+    </MudPaper>
+
+    @if (_isLoading)
+    {
+        <MudStack AlignItems="AlignItems.Center" Class="my-8">
+            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+        </MudStack>
+    }
+    else if (_page is null || _page.Items.Count == 0)
+    {
+        <MudPaper Elevation="0" Class="pa-8 d-flex flex-column align-center">
+            <MudIcon Icon="@Icons.Material.Filled.SearchOff" Style="font-size: 6rem;" Class="mb-4" />
+            <MudText Typo="Typo.h6">No training matches</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="@_page.Items" Hover="true" Elevation="1" T="AdministrationTrainingHttpResponse">
+            <HeaderContent>
+                <MudTh>Title</MudTh>
+                <MudTh>Owner</MudTh>
+                <MudTh>State</MudTh>
+                <MudTh>Reason</MudTh>
+                <MudTh />
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Title">@context.Title</MudTd>
+                <MudTd DataLabel="Owner">
+                    @* The name, not the identifier. An owner whose account is gone leaves this
+                       blank rather than dropping the row: a moderator has to see a training whose
+                       owner has since left, and what is missing is the name, not the training. *@
+                    @if (string.IsNullOrWhiteSpace(context.TrainerName))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">
+                            <em>No longer a trainer</em>
+                        </MudText>
+                    }
+                    else
+                    {
+                        @context.TrainerName
+                    }
+                </MudTd>
+                <MudTd DataLabel="State">
+                    @if (IsWithheld(context))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                            Withheld
+                        </MudChip>
+                    }
+                    else if (!IsPublished(context))
+                    {
+                        @* Withdrawn by its owner, which is a different thing from taken from them
+                           (ADR 0052) — so it is shown differently rather than merged into one
+                           "not on offer" badge. *@
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">
+                            Unpublished
+                        </MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Reason">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@context.WithholdingReason</MudText>
+                </MudTd>
+                <MudTd>
+                    @if (IsWithheld(context))
+                    {
+                        <MudButton Size="Size.Small"
+                                   Color="Color.Success"
+                                   Variant="Variant.Text"
+                                   OnClick="@(() => Release(context))">
+                            Release
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small"
+                                   Color="Color.Error"
+                                   Variant="Variant.Text"
+                                   OnClick="@(() => Withhold(context))">
+                            Withhold
+                        </MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        @if (_page.TotalPages > 1)
+        {
+            <MudStack AlignItems="AlignItems.Center" Class="mt-6">
+                <MudPagination Count="@_page.TotalPages"
+                               Selected="@_currentPage"
+                               SelectedChanged="OnPageSelectedAsync" />
+            </MudStack>
+        }
+    }
+</MudContainer>
+
+@code {
+    // The three words the domain publishes (ADR 0052), compared ordinally.
+    private const string PublishedStatus = "Published";
+    private const string UnpublishedStatus = "Unpublished";
+    private const string WithheldStatus = "Withheld";
+
+    private PagedHttpResponseOfAdministrationTrainingHttpResponse? _page;
+    private string? _status;
+    private int _currentPage = 1;
+    private bool _isLoading = true;
+
+    private static bool IsWithheld(AdministrationTrainingHttpResponse training)
+        => string.Equals(training.Status, WithheldStatus, StringComparison.Ordinal);
+
+    private static bool IsPublished(AdministrationTrainingHttpResponse training)
+        => string.Equals(training.Status, PublishedStatus, StringComparison.Ordinal);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnStatusChangedAsync(string? status)
+    {
+        _status = status;
+        _currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnPageSelectedAsync(int page)
+    {
+        _currentPage = page;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _page = await AdministrationClient.GetTrainingsAsync(_status, _currentPage, null);
+
+            if (_currentPage > _page.TotalPages)
+            {
+                _currentPage = _page.TotalPages;
+                _page = await AdministrationClient.GetTrainingsAsync(_status, _currentPage, null);
+            }
+        }
+        catch (Exception exception)
+        {
+            AdministrationFailures.Report(Snackbar, exception, "The trainings could not be loaded.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task Withhold(AdministrationTrainingHttpResponse training)
+    {
+        var reason = await ReasonDialogs.AskAsync(
+            DialogService,
+            title: "Withhold training",
+            prompt: "Withhold",
+            subject: training.Title,
+            consequence: "It stops being offered publicly and its owner cannot publish it again "
+                         + "themselves. They are told by email, with this reason.",
+            verb: "Withhold");
+
+        if (reason is null)
+        {
+            return;
+        }
+
+        await RunAsync(
+            () => AdministrationClient.WithholdTrainingAsync(
+                training.Id, new WithholdTrainingHttpRequest { Reason = reason }),
+            "Training withheld. Its owner has been told, with the reason.",
+            "withheld");
+    }
+
+    private async Task Release(AdministrationTrainingHttpResponse training) =>
+        // No dialog: lifting an interdiction takes nothing away from anybody. The training lands on
+        // Unpublished rather than back on offer — putting it in the window again is its owner's
+        // call, not the administration's (ADR 0052).
+        await RunAsync(
+            () => AdministrationClient.ReleaseTrainingAsync(training.Id),
+            "Interdiction lifted. Its owner may publish it again.",
+            "released");
+
+    private async Task RunAsync(Func<Task> action, string success, string verb)
+    {
+        var outcome = await AdministrationFailures.RunAsync(Snackbar, action, success, verb, "training");
+
+        if (outcome is not AdministrationOutcome.Unreachable)
+        {
+            await LoadAsync();
+        }
+    }
+}

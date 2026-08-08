@@ -5,8 +5,9 @@ namespace TrainingHub.Shared.Api.Contracts.Administration;
 /// </summary>
 /// <remarks>
 /// Its own contract rather than <c>TrainingHttpResponse</c> with a field added (ADR 0055). It
-/// carries five members where that one carries nine: moderating a training is decided on the
-/// training itself, at its own address, not on a row of a list.
+/// carries six members where that one carries nine, and they are not a subset: moderating a
+/// training is decided on the training itself, at its own address, not on a row of a list — but a
+/// row has to say whose training it is, which a trainer's own listing never needs to.
 /// <para>
 /// One consequence is worth stating rather than discovering. Because the withholding reason lives
 /// here and not on <c>TrainingHttpResponse</c>, a trainer whose training was withheld still cannot
@@ -21,6 +22,16 @@ public sealed class AdministrationTrainingHttpResponse
 
     /// <summary>The trainer who owns it — the next question an administrator asks.</summary>
     public required Guid TrainerId { get; init; }
+
+    /// <summary>
+    /// That trainer's name, or <see langword="null"/> when no trainer answers to that identifier
+    /// any more.
+    /// </summary>
+    /// <remarks>
+    /// The identifier is what the administrative endpoints take; this is what a person reads. A row
+    /// carrying only the first answers "whose is this?" with a value nobody can read.
+    /// </remarks>
+    public string? TrainerName { get; init; }
 
     /// <summary>The training's title.</summary>
     public required string Title { get; init; }

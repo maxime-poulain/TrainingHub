@@ -56,30 +56,44 @@ public static class TrainingProjections
     public static List<TrainingDto> ToDtos(this IEnumerable<Training> trainings) => [.. trainings.Select(ToDto)];
 
     /// <summary>
-    /// The administration's mapping, in the form EF Core can translate.
+    /// Maps an aggregate already loaded in memory, for the administration.
     /// </summary>
     /// <remarks>
-    /// A second expression rather than a superset of the first (ADR 0055): two audiences, two
-    /// shapes, and no column that crosses between them by accident. This one names five columns
-    /// where the other names nine — a moderation list does not read a training's content, and the
-    /// difference is worth seeing in the <c>SELECT</c> rather than only in the DTO.
+    /// A second shape rather than a superset of the first (ADR 0055): two audiences, two shapes,
+    /// and no column that crosses between them by accident. This one names six members where the
+    /// other names nine, and they are not a subset — a moderation list does not read a training's
+    /// content, and it does read whose training it is.
+    /// <para>
+    /// <strong>A method rather than an expression, and the owner's name arrives as an argument.</strong>
+    /// Its sibling above is an <see cref="Expression"/> because the CQRS reader hands it to EF Core;
+    /// this one cannot be, because the column it needs is not on the aggregate. A <c>Training</c>
+    /// knows its owner's identifier and has never known their name — that is what makes them two
+    /// aggregates — so the layered reader looks the names up for the whole page and passes each row
+    /// its own. The row is still built exactly once, which is the point of taking the name here
+    /// rather than filling it in afterwards (ADR 0044).
+    /// </para>
+    /// <para>
+    /// The CQRS reader gets the same column in the same statement instead, because it can see the
+    /// trainers' table and this cannot. Two mechanisms for one shape, held together by an
+    /// end-to-end fact both hosts answer — the same arrangement as every other paged read here.
+    /// </para>
     /// </remarks>
-    public static readonly Expression<Func<Training, AdministrationTrainingDto>> ToAdministrationDtoExpression =
-        training => new AdministrationTrainingDto
+    /// <param name="training">The training to map.</param>
+    /// <param name="trainerName">
+    /// Its owner's name, or <see langword="null"/> when no trainer answers to its identifier.
+    /// </param>
+    public static AdministrationTrainingDto ToAdministrationDto(this Training training, string? trainerName)
+    {
+        ArgumentNullException.ThrowIfNull(training);
+
+        return new AdministrationTrainingDto
         {
             Id = training.Id.Value,
             TrainerId = training.TrainerId.Value,
+            TrainerName = trainerName,
             Title = training.Title.Value,
             Status = training.Status.Name,
-            WithholdingReason = training.WithholdingReason == null ? null : training.WithholdingReason.Value
+            WithholdingReason = training.WithholdingReason?.Value
         };
-
-    private static readonly Func<Training, AdministrationTrainingDto> CompiledAdministration =
-        ToAdministrationDtoExpression.Compile();
-
-    /// <summary>
-    /// Maps an aggregate already loaded in memory, for the administration.
-    /// </summary>
-    public static AdministrationTrainingDto ToAdministrationDto(this Training training) =>
-        CompiledAdministration(training);
+    }
 }

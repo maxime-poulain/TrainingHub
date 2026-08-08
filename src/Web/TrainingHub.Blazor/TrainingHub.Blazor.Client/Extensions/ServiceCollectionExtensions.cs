@@ -49,6 +49,9 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient<ITrainerClient, TrainerClient>(HttpClientNames.Api);
         services.AddHttpClient<ITrainingClient, TrainingClient>(HttpClientNames.Api);
         services.AddHttpClient<IAuthClient, AuthClient>(HttpClientNames.Api);
+        // Generated since the administrative endpoints landed and registered only now, because
+        // nothing in the browser could reach them until there was a screen to ask from.
+        services.AddHttpClient<IAdministrationClient, AdministrationClient>(HttpClientNames.Api);
 
         return services;
     }

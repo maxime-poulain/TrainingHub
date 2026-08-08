@@ -1,0 +1,237 @@
+@page "/administration/trainers"
+@attribute [Authorize(Roles = "Administrator")]
+@using TrainingHub.Blazor.Client.Infrastructure
+@using TrainingHub.GeneratedClients
+@inject IAdministrationClient AdministrationClient
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="my-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Trainers</MudText>
+
+    <MudPaper Elevation="0" Class="pa-4 mb-4">
+        <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Center">
+            <MudSelect T="string"
+                       Label="Standing"
+                       Value="@_status"
+                       ValueChanged="OnStatusChangedAsync"
+                       Clearable="true"
+                       Variant="Variant.Outlined"
+                       Dense="true"
+                       Style="max-width: 16rem;">
+                @* The two words the domain publishes, compared ordinally by the server. Anything
+                   else is a 400 naming the parameter rather than an empty page, so there is nothing
+                   here to invent. *@
+                <MudSelectItem T="string" Value="@ActiveStatus">Active</MudSelectItem>
+                <MudSelectItem T="string" Value="@SuspendedStatus">Suspended</MudSelectItem>
+            </MudSelect>
+
+            <MudTextField T="string"
+                          Label="Search"
+                          Value="@_search"
+                          ValueChanged="OnSearchChangedAsync"
+                          DebounceInterval="400"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Clearable="true"
+                          MaxLength="SearchMaxLength"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          HelperText="Name or contact address" />
+        </MudStack>
+    </MudPaper>
+
+    @if (_isLoading)
+    {
+        <MudStack AlignItems="AlignItems.Center" Class="my-8">
+            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+        </MudStack>
+    }
+    else if (_page is null || _page.Items.Count == 0)
+    {
+        <MudPaper Elevation="0" Class="pa-8 d-flex flex-column align-center">
+            <MudIcon Icon="@Icons.Material.Filled.PersonSearch" Style="font-size: 6rem;" Class="mb-4" />
+            <MudText Typo="Typo.h6">No trainer matches</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                An empty page is a legitimate answer; a mistyped filter is refused instead.
+            </MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="@_page.Items" Hover="true" Elevation="1" T="AdministrationTrainerHttpResponse">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Contact address</MudTh>
+                <MudTh>Standing</MudTh>
+                <MudTh>Reason</MudTh>
+                <MudTh />
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Firstname @context.Lastname</MudTd>
+                <MudTd DataLabel="Contact address">@context.ContactEmail</MudTd>
+                <MudTd DataLabel="Standing">
+                    @* Only the sanctioned state gets a badge. Active is what a trainer is unless
+                       something happened to them, and a chip on every row would make the one that
+                       matters harder to see — the same choice the trainer's own catalogue makes. *@
+                    @if (IsSuspended(context))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                            Suspended
+                        </MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Reason">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@context.SuspensionReason</MudText>
+                </MudTd>
+                <MudTd>
+                    @if (IsSuspended(context))
+                    {
+                        <MudButton Size="Size.Small"
+                                   Color="Color.Success"
+                                   Variant="Variant.Text"
+                                   OnClick="@(() => Reinstate(context))">
+                            Reinstate
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Size="Size.Small"
+                                   Color="Color.Error"
+                                   Variant="Variant.Text"
+                                   OnClick="@(() => Suspend(context))">
+                            Suspend
+                        </MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        @if (_page.TotalPages > 1)
+        {
+            <MudStack AlignItems="AlignItems.Center" Class="mt-6">
+                <MudPagination Count="@_page.TotalPages"
+                               Selected="@_currentPage"
+                               SelectedChanged="OnPageSelectedAsync" />
+            </MudStack>
+        }
+    }
+</MudContainer>
+
+@code {
+    // The words the domain publishes (ADR 0050). Compared ordinally: protocol values, never
+    // something to fold with the viewer's culture.
+    private const string ActiveStatus = "Active";
+    private const string SuspendedStatus = "Suspended";
+
+    // The bound the filter contract publishes, and nothing tighter.
+    private const int SearchMaxLength = 100;
+
+    private PagedHttpResponseOfAdministrationTrainerHttpResponse? _page;
+    private string? _status;
+    private string? _search;
+    private int _currentPage = 1;
+    private bool _isLoading = true;
+
+    private static bool IsSuspended(AdministrationTrainerHttpResponse trainer)
+        => string.Equals(trainer.Status, SuspendedStatus, StringComparison.Ordinal);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task OnStatusChangedAsync(string? status)
+    {
+        _status = status;
+        // Back to the first page: the page the caller was standing on describes a different
+        // question once the filter changes, and keeping the number would show them page four of
+        // something they never asked for.
+        _currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnSearchChangedAsync(string? search)
+    {
+        _search = search;
+        _currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnPageSelectedAsync(int page)
+    {
+        _currentPage = page;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            // The size travels unset: the default is the server's to choose and the cap the
+            // server's to hold (ADR 0029). Blank means no filter, which the API already treats as
+            // absent, so nothing is normalised here.
+            _page = await AdministrationClient.GetTrainersAsync(_status, _search, _currentPage, null);
+
+            // A page can fall past the end when a filter narrows the set under a caller who was
+            // deeper in. The server decides how many pages there are, so it is asked again.
+            if (_currentPage > _page.TotalPages)
+            {
+                _currentPage = _page.TotalPages;
+                _page = await AdministrationClient.GetTrainersAsync(_status, _search, _currentPage, null);
+            }
+        }
+        catch (Exception exception)
+        {
+            AdministrationFailures.Report(Snackbar, exception, "The trainers could not be loaded.");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task Suspend(AdministrationTrainerHttpResponse trainer)
+    {
+        var reason = await ReasonDialogs.AskAsync(
+            DialogService,
+            title: "Suspend trainer",
+            prompt: "Suspend",
+            subject: $"{trainer.Firstname} {trainer.Lastname}",
+            consequence: "They keep their account and their trainings, and their catalogue leaves "
+                         + "public view until the suspension is lifted. They are told by email, with "
+                         + "this reason.",
+            verb: "Suspend");
+
+        if (reason is null)
+        {
+            return;
+        }
+
+        await RunAsync(
+            () => AdministrationClient.SuspendTrainerAsync(
+                trainer.Id, new SuspendTrainerHttpRequest { Reason = reason }),
+            "Trainer suspended. They have been told, with the reason.",
+            "suspended");
+    }
+
+    private async Task Reinstate(AdministrationTrainerHttpResponse trainer) =>
+        // No dialog and no reason: a lifting restores rather than decides, and there is nothing to
+        // record about it that the trainer needs to read (ADR 0050).
+        await RunAsync(
+            () => AdministrationClient.ReinstateTrainerAsync(trainer.Id),
+            "Trainer reinstated. Their catalogue is on offer again.",
+            "reinstated");
+
+    private async Task RunAsync(Func<Task> action, string success, string verb)
+    {
+        var outcome = await AdministrationFailures.RunAsync(Snackbar, action, success, verb, "trainer");
+
+        if (outcome is not AdministrationOutcome.Unreachable)
+        {
+            await LoadAsync();
+        }
+    }
+}

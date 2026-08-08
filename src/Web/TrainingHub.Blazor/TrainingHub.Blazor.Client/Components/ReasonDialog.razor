@@ -1,0 +1,96 @@
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <MudText>
+            @Prompt "<strong>@Subject</strong>"?
+        </MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">
+            @Consequence
+        </MudText>
+        @* The reason is the whole point of this dialog rather than a field on it. ADR 0052 made a
+           withholding a state distinct from a withdrawal so that the person it lands on could be
+           told the difference, and the reason is what the notice carries and what the trainer reads
+           afterwards. A dialog that let it through empty would produce a sanction nobody can
+           explain. *@
+        <MudForm @ref="_form" @bind-IsValid="_isValid" Class="mt-4">
+            <MudTextField @bind-Value="_reason"
+                          Label="Reason"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          RequiredError="A reason is required"
+                          Validation="@(new Func<string, string?>(ValidateReason))"
+                          Immediate="true"
+                          Lines="3"
+                          Counter="ReasonMaxLength"
+                          MaxLength="ReasonMaxLength"
+                          HelperText="The trainer is told this, word for word." />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+        <MudButton Color="Color.Warning"
+                   Variant="Variant.Filled"
+                   Disabled="@(!_isValid)"
+                   OnClick="Confirm">
+            @Verb
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // The bound the two contracts publish, and nothing tighter: SuspendTrainerHttpRequest and
+    // WithholdTrainingHttpRequest both declare StringLength(500, MinimumLength = 1). A page that
+    // refused what the server accepts is the one direction of that mistake nobody reports, because
+    // it never produces an error to read.
+    private const int ReasonMaxLength = 500;
+
+    private MudForm _form = null!;
+    private bool _isValid;
+    private string _reason = string.Empty;
+
+    /// <summary>The sentence before the subject — "Suspend", "Withhold from public view".</summary>
+    [Parameter]
+    public string Prompt { get; set; } = string.Empty;
+
+    /// <summary>What is being acted on: a trainer's name, a training's title.</summary>
+    [Parameter]
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>What this does and what it does not, in the second line.</summary>
+    [Parameter]
+    public string Consequence { get; set; } = string.Empty;
+
+    /// <summary>The confirming button's label.</summary>
+    [Parameter]
+    public string Verb { get; set; } = string.Empty;
+
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private static string? ValidateReason(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "A reason is required";
+        }
+
+        return value.Length > ReasonMaxLength
+            ? $"A reason cannot exceed {ReasonMaxLength} characters"
+            : null;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Confirm()
+    {
+        // Validated once more here and not only through the disabled button: the button's state
+        // follows the form's, and a form that has never been touched has never been validated.
+        await _form.ValidateAsync();
+
+        if (_isValid)
+        {
+            MudDialog.Close(DialogResult.Ok(_reason.Trim()));
+        }
+    }
+}

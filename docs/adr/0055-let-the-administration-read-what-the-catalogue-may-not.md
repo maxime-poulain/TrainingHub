@@ -99,7 +99,10 @@ GET /Administration/trainings?status=&page=&pageSize=
   trainer's own surface learns to show it.
 - **A second projection to keep in step.** `ToAdministrationDtoExpression` sits beside
   `ToDtoExpression` for each aggregate, on purpose: a reader comparing them sees in one screen what
-  the administration is shown and what a trainer is.
+  the administration is shown and what a trainer is. The trainings' half stopped being an expression
+  once the row learned to name its owner — a column no aggregate carries, so the layered reader
+  passes it in and the CQRS reader joins for it. The pairing this bullet asks a reader to compare is
+  unchanged; only one of the two is now a method.
 - **Rule 165**, `NoRepositoryQuestion_TakesAPredicateOrAnOrdering`. Its sibling refuses
   `ISpecification`; this refuses the bare shape somebody writes once they have understood that a
   specification would be refused. A line at "named criteria" is only a line while nothing anonymous

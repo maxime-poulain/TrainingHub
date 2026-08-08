@@ -115,6 +115,7 @@ public static class ApplicationToHttpMappings
         {
             Id = training.Id,
             TrainerId = training.TrainerId,
+            TrainerName = training.TrainerName,
             Title = training.Title,
             Status = training.Status,
             WithholdingReason = training.WithholdingReason

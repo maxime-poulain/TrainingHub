@@ -1,6 +1,5 @@
 using TrainingHub.DDDWithCqrs.Application.Features.Trainings.GetAdministered;
 using TrainingHub.Shared.Application.Dtos.Training;
-using TrainingHub.Shared.Application.Projections;
 using TrainingHub.Shared.Common.Pagination;
 using TrainingHub.Shared.CQS;
 using TrainingHub.Shared.Domain.Aggregates.TrainingAggregate;
@@ -28,6 +27,13 @@ namespace TrainingHub.DDDWithCqrs.Infrastructure.Features.Trainings.GetAdministe
 /// One filter, where the trainers' reader has two. A title is value-converted, and EF Core cannot
 /// look inside a converted property — checked, not assumed (ADR 0055).
 /// </para>
+/// <para>
+/// The owner's name is read in the same statement, by a correlated sub-select the projection can
+/// afford because this reader can see the trainers' table. Its layered counterpart cannot — it maps
+/// aggregates, and a <c>Training</c> has never known its owner's name — so it looks the names up
+/// for the whole page through <c>ITrainerNamesQuery</c> instead. Two mechanisms, one shape, held
+/// together by an end-to-end fact both hosts answer.
+/// </para>
 /// </remarks>
 public sealed class GetAdministeredTrainingsQueryHandler(TrainingContext trainingContext)
     : IQueryHandler<GetAdministeredTrainingsQuery, PagedResult<AdministrationTrainingDto>>
@@ -49,9 +55,24 @@ public sealed class GetAdministeredTrainingsQueryHandler(TrainingContext trainin
             trainings = trainings.Where(training => training.Status == status);
         }
 
+        var trainers = trainingContext.Trainers;
+
         return await trainings
             .NewestFirst<Training, TrainingId>()
             .ToPagedResultAsync(
-                TrainingProjections.ToAdministrationDtoExpression, request.Paging, cancellationToken);
+                training => new AdministrationTrainingDto
+                {
+                    Id = training.Id.Value,
+                    TrainerId = training.TrainerId.Value,
+                    TrainerName = trainers
+                        .Where(trainer => trainer.Id == training.TrainerId)
+                        .Select(trainer => trainer.Name.Firstname + " " + trainer.Name.Lastname)
+                        .FirstOrDefault(),
+                    Title = training.Title.Value,
+                    Status = training.Status.Name,
+                    WithholdingReason = training.WithholdingReason == null ? null : training.WithholdingReason.Value
+                },
+                request.Paging,
+                cancellationToken);
     }
 }

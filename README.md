@@ -820,8 +820,10 @@ administrator is: a permission, not a context. There used to be
 five more — `/Trainer/all`, `/Trainer/{id}`, `/Training/all`, `/Training/by-trainer/{id}` and
 `/Training/by-topic/{topic}` — and between them they handed out every trainer's name, contact email
 and bio to any authenticated caller, enumerable. Nothing in the application asked for them: the
-front end reads the signed-in trainer's profile and that trainer's own trainings. They were removed
-rather than restricted, because a catalogue read scoped to one caller is not a catalogue read.
+front end reads the signed-in trainer's profile and that trainer's own trainings — and, on the two
+administrative screens, every trainer and every training, which it asks for at `/Administration` and
+is answered `403` anywhere else. They were removed rather than restricted, because a catalogue read
+scoped to one caller is not a catalogue read.
 
 **Two of them have come back, and the difference is the audience rather than the shape**
 ([ADR 0055](docs/adr/0055-let-the-administration-read-what-the-catalogue-may-not.md)). The two
@@ -1050,9 +1052,10 @@ It refuses nothing either: a password Identity rejects, or a username with no pa
 from, is reported in the log and the host starts anyway.
 
 **`admin` is nobody's trainer** — that is the point of it, not an omission. Its token carries no
-`trainer_id`, so the trainer endpoints answer it `403`. Until the administration screens exist it is
-therefore useful through the API, `/scalar/v1` in Development being the quickest way in; signing it
-into the Blazor front end reaches pages that have nothing to show it yet.
+`trainer_id`, so the trainer endpoints answer it `403`. What it can reach is its own: signing it into
+the Blazor front end shows two navigation entries nobody else sees, `/administration/trainers` and
+`/administration/trainings`. The same authority is reachable through the API, `/scalar/v1` in
+Development being the quickest way in.
 
 #### Sending real email
 
@@ -1130,9 +1133,9 @@ The two filters are exact inverses, so between them every test runs exactly once
 | `TrainingHub.DDD.Application.Tests` | Application services, factories, mappers, domain event handlers — including the eleven that translate a domain event into an integration event — and the fourteen post-commit consumers |
 | `TrainingHub.DDDWithCqrs.Tests` | Command handlers, validators, pipeline behaviours |
 | `TrainingHub.Shared.Api.Tests` | Entity-tag encoding and parsing, the guard that keeps client generation away from a database, what the unhandled-exception handler is allowed to tell a caller, and the transformer that describes an uploaded file inline so a client generator recognises it as one |
-| `TrainingHub.Shared.Infrastructure.Tests` | The auditable-entities interceptor — that it stamps, and reads the clock once per entity —, the outbox publisher observed through the change tracker, the serializer's round trip for every registered event, the dispatcher held to its routing table, the envelope's state transitions, and the bucket bootstrapper, mostly for when it does nothing |
+| `TrainingHub.Shared.Infrastructure.Tests` | The auditable-entities interceptor — that it stamps, and reads the clock once per entity —, the outbox publisher observed through the change tracker, the serializer's round trip for every registered event, the dispatcher held to its routing table, the envelope's state transitions, the bucket bootstrapper, mostly for when it does nothing, and — over SQLite rather than a substitute — the names a page of trainings asks for by identifier |
 | `TrainingHub.Blazor.Bff.Tests` | The backend for frontend over HTTP: the cookie's flags, the forgery guard, the token attached to a forwarded call, and what signing out revokes |
-| `TrainingHub.Blazor.Client.Tests` | The front end, rendered in-process with bUnit: the sign-in page's refusal to redirect anywhere but a path of its own origin, the deep link a redirect to sign-in preserves, the header that makes a cookie-authenticated call unusable as a forgery, an unreachable BFF read as anonymous rather than as an exception, the per-field messages read out of a problem document, the training form's bounds tied to the ones the generated contract publishes, and — on the profile page — the size ceiling that refuses a file before it is uploaded, the image address that defeats a year-long cache, and the server's refusal shown in its own words |
+| `TrainingHub.Blazor.Client.Tests` | The front end, rendered in-process with bUnit: the sign-in page's refusal to redirect anywhere but a path of its own origin, the deep link a redirect to sign-in preserves, the header that makes a cookie-authenticated call unusable as a forgery, an unreachable BFF read as anonymous rather than as an exception, the per-field messages read out of a problem document, the training form's bounds tied to the ones the generated contract publishes, and — on the profile page — the size ceiling that refuses a file before it is uploaded, the image address that defeats a year-long cache, and the server's refusal shown in its own words. The administrative pages are here too: the coordinates each listing owns and the criteria it forwards unchanged, the reason a dialog collected reaching the call that carries it, the lifting that asks for no reason at all, and the training row that names its owner rather than showing an identifier |
 | `TrainingHub.DDD.Api.IntegrationTests` | The layered host, HTTP end to end against a real SQL Server and a real object store |
 | `TrainingHub.DDDWithCqrs.Api.IntegrationTests` | The CQRS host, same treatment |
 | `TrainingHub.Architecture.Tests` | The decisions themselves: the dependency rule, the CQRS shape, the modelling conventions, and a rule that fails when a record is defended by nothing — see [ADR 0013](docs/adr/0013-make-every-record-answer-to-a-test.md) |

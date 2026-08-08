@@ -1,23 +1,56 @@
 @inject NavigationManager NavigationManager
 
+@if (_refused)
+{
+    <MudContainer MaxWidth="MaxWidth.Small" Class="my-8">
+        <MudPaper Elevation="0" Class="pa-8 d-flex flex-column align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size: 5rem;" Class="mb-4" />
+            <MudText Typo="Typo.h6" Class="mb-2">This page is not yours to open</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mb-4">
+                You are signed in, but this page needs an authority your account does not carry.
+                Signing in again will not change that.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/">
+                Back to your own pages
+            </MudButton>
+        </MudPaper>
+    </MudContainer>
+}
+
 @code {
     /// <summary>
-    /// Sends an unauthenticated visitor to the sign-in page, remembering where they were going.
+    /// Turns a refusal into whichever of the two things it actually is.
     /// </summary>
     /// <remarks>
-    /// The address is carried as a <c>returnUrl</c> query parameter rather than dropped. Without
-    /// it every deep link — a training opened from a bookmark, a page reloaded after the session
-    /// expired — landed on the catalogue after sign-in, and the user had to find their way back to
-    /// something they had already asked for.
     /// <para>
-    /// Relative, and made relative deliberately: <c>ToBaseRelativePath</c> strips the origin, so
-    /// what reaches <c>returnUrl</c> cannot name another host. A redirect target taken from the
-    /// address bar and replayed after authentication is an open-redirect if it is allowed to be
-    /// absolute.
+    /// This used to redirect unconditionally, which was right while every guarded page asked only
+    /// for a signed-in caller: the only way to be refused was to be nobody. The administration
+    /// pages are the first that refuse somebody, and against them the old behaviour sent a signed-in
+    /// trainer to a sign-in page they had already been through — a loop that reads as a broken
+    /// application rather than as a decision, because signing in again lands them right back here.
+    /// </para>
+    /// <para>
+    /// The anonymous half is untouched, deliberately, including the part that matters:
+    /// <c>ToBaseRelativePath</c> strips the origin, so what reaches <c>returnUrl</c> cannot name
+    /// another host. A redirect target taken from the address bar and replayed after authentication
+    /// is an open redirect if it is allowed to be absolute.
     /// </para>
     /// </remarks>
-    protected override void OnInitialized()
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private bool _refused;
+
+    protected override async Task OnInitializedAsync()
     {
+        if (await IsSignedInAsync())
+        {
+            // Nothing to redirect to. Saying so is the whole change: the caller is not missing a
+            // session, they are missing an authority, and only one of those has a remedy.
+            _refused = true;
+            return;
+        }
+
         var requested = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
 
         var login = string.IsNullOrEmpty(requested)
@@ -25,5 +58,20 @@
             : $"/login?returnUrl={Uri.EscapeDataString("/" + requested)}";
 
         NavigationManager.NavigateTo(login);
+    }
+
+    private async Task<bool> IsSignedInAsync()
+    {
+        // No cascading state at all is treated as anonymous rather than as an error: it is what a
+        // component rendered outside CascadingAuthenticationState sees, and the safe reading of an
+        // unknown caller is the one that asks them to sign in.
+        if (AuthenticationState is null)
+        {
+            return false;
+        }
+
+        var state = await AuthenticationState;
+
+        return state.User.Identity?.IsAuthenticated == true;
     }
 }

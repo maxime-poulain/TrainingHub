@@ -86,6 +86,63 @@ public sealed class AdministrationListingServiceTests
     }
 
     /// <summary>
+    /// Get administered page async, a page of trainings, names the owner it could only identify.
+    /// </summary>
+    /// <remarks>
+    /// The column no aggregate can answer. A <c>Training</c> knows its owner's identifier and has
+    /// never known their name, so this is the one row member the layered reader fetches rather than
+    /// maps — and the one that would silently stay <see langword="null"/> if the lookup were
+    /// dropped.
+    /// </remarks>
+    [Fact]
+    public async Task GetAdministeredPageAsync_APageOfTrainings_NamesTheOwnerItCouldOnlyIdentify()
+    {
+        var withheld = await new TrainingBuilder().BuildValidAsync();
+
+        _trainings.TrainingRepository
+            .Setup(repository => repository.GetPageAsync(
+                It.IsAny<TrainingStatus?>(), It.IsAny<PageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagedResult<Training>([withheld], 1, 20, 1));
+
+        _trainings.TrainerNames
+            .Setup(names => names.GetAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(withheld.TrainerId.Value)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, string> { [withheld.TrainerId.Value] = "Ada Lovelace" });
+
+        var page = await _trainings.CreateSut().GetAdministeredPageAsync(
+            new AdministrationTrainingRequest(), new PageRequest());
+
+        page.Items.Should().ContainSingle().Which.TrainerName.Should().Be("Ada Lovelace");
+    }
+
+    /// <summary>
+    /// Get administered page async, an owner nobody answers to, leaves the name unset rather than
+    /// dropping the row.
+    /// </summary>
+    /// <remarks>
+    /// A moderator has to see a training whose owner has since gone, not lose it from the list. The
+    /// name is what is missing, not the row.
+    /// </remarks>
+    [Fact]
+    public async Task GetAdministeredPageAsync_AnOwnerNobodyAnswersTo_LeavesTheNameUnsetRatherThanDroppingTheRow()
+    {
+        var orphaned = await new TrainingBuilder().BuildValidAsync();
+
+        _trainings.TrainingRepository
+            .Setup(repository => repository.GetPageAsync(
+                It.IsAny<TrainingStatus?>(), It.IsAny<PageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagedResult<Training>([orphaned], 1, 20, 1));
+
+        var page = await _trainings.CreateSut().GetAdministeredPageAsync(
+            new AdministrationTrainingRequest(), new PageRequest());
+
+        var row = page.Items.Should().ContainSingle().Subject;
+        row.Id.Should().Be(orphaned.Id.Value);
+        row.TrainerName.Should().BeNull();
+    }
+
+    /// <summary>
     /// Get administered page async, a page of trainings, carries the withholding reason out.
     /// </summary>
     /// <remarks>

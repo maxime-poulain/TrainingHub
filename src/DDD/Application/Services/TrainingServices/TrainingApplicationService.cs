@@ -1,5 +1,6 @@
 using TrainingHub.Shared;
 using TrainingHub.Shared.Application.Projections;
+using TrainingHub.Shared.Application.Queries;
 using TrainingHub.Shared.Application.Dtos.Training;
 using TrainingHub.Shared.Common;
 using TrainingHub.Shared.Common.Errors;
@@ -134,6 +135,7 @@ public interface ITrainingApplicationService
 /// </summary>
 public sealed class TrainingApplicationService(
     ITrainerRepository trainerRepository,
+    ITrainerNamesQuery trainerNames,
     IUniquenessTitleChecker uniquenessTitleChecker,
     ITrainingCounter trainingCounter,
     ITrainerStanding trainerStanding,
@@ -411,7 +413,15 @@ public sealed class TrainingApplicationService(
         // Map carries the counts and the position across untouched.
         var page = await trainingRepository.GetPageAsync(request.Status, paging, cancellationToken);
 
-        return page.Map(training => training.ToAdministrationDto());
+        // The one column the aggregates cannot answer: a Training knows its owner's identifier and
+        // has never known their name, which is what makes them two aggregates. One question for the
+        // whole page rather than one per row, and the row is still built once — the name arrives as
+        // an argument rather than being filled in afterwards.
+        var names = await trainerNames.GetAsync(
+            [.. page.Items.Select(training => training.TrainerId.Value)], cancellationToken);
+
+        return page.Map(training =>
+            training.ToAdministrationDto(names.GetValueOrDefault(training.TrainerId.Value)));
     }
 
     /// <inheritdoc />

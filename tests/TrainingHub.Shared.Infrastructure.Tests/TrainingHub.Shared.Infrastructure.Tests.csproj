@@ -16,10 +16,16 @@
     <!-- The interceptor is exercised through a real change tracker; the store itself is
          irrelevant to what is asserted, so the in-memory provider is enough. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <!-- For TrainerNamesQueryTests: the in-memory provider cannot query a complex property
+         (ADR 0032) and would run the comparison in LINQ to objects anyway, which is the one thing
+         that query must not be proven by. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TrainingHub.Shared.Infrastructure\TrainingHub.Shared.Infrastructure.csproj" />
+    <!-- TrainerBuilder: the aggregate is assembled the way every other suite assembles it. -->
+    <ProjectReference Include="..\TrainingHub.Shared.Domain.Tests\TrainingHub.Shared.Domain.Tests.csproj" />
   </ItemGroup>
 
 </Project>

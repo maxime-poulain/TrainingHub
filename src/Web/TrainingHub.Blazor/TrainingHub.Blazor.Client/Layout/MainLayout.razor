@@ -17,6 +17,27 @@
             <Authorized>
                 <MudButton Variant="Variant.Text" Color="Color.Inherit" Href="/trainings">Trainings</MudButton>
                 <MudButton Variant="Variant.Text" Color="Color.Inherit" Href="/profile">Profile</MudButton>
+                @* The first thing in this front end conditioned on a role rather than merely on
+                   being signed in. The BFF canonicalises the token's short `role` claim precisely
+                   so that this works on either side of the cookie; until now nothing used it.
+                   Hiding the links is courtesy, not security — the API refuses the calls behind
+                   AdministratorPolicy whatever the browser renders (ADR 0051, ADR 0054).
+                   Context is named because the outer AuthorizeView already owns `context`. *@
+                <AuthorizeView Roles="Administrator" Context="administrator">
+                    <Authorized>
+                        <MudDivider Vertical="true" FlexItem="true" Class="mx-2" />
+                        <MudButton Variant="Variant.Text"
+                                   Color="Color.Inherit"
+                                   Href="/administration/trainers">
+                            Manage trainers
+                        </MudButton>
+                        <MudButton Variant="Variant.Text"
+                                   Color="Color.Inherit"
+                                   Href="/administration/trainings">
+                            Moderate trainings
+                        </MudButton>
+                    </Authorized>
+                </AuthorizeView>
                 <MudText Typo="Typo.body1" Class="mx-4">@context.User.Identity?.Name</MudText>
                 <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="HandleLogout" />
             </Authorized>

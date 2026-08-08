@@ -57,6 +57,34 @@ public abstract class AdministrationListTest<TFactory>(TFactory factory) : Integ
     }
 
     /// <summary>
+    /// A training row, names its owner rather than only identifying them.
+    /// </summary>
+    /// <remarks>
+    /// The one column the two stacks obtain differently and must still agree on: the CQRS handler
+    /// joins in its projection, the layered service asks a second question and folds the answers in
+    /// (ADR 0044 leaves the row built once either way). A join that silently produced nothing would
+    /// show an administrator a screen of blanks, and a unit test of either stack alone would not
+    /// notice — this is the only place both are asked the same question against a real database.
+    /// </remarks>
+    [Fact]
+    public async Task ATrainingRow_NamesItsOwnerRatherThanOnlyIdentifyingThem()
+    {
+        var owner = await AuthHelper.RegisterAndGetAuthenticatedClientAsync(Factory);
+        var profile = await CurrentTrainerAsync(owner);
+        var trainingId = await CreateTrainingAsync(owner, "A training whose owner has a name");
+
+        var administrator = await AuthHelper.SignInAsAdministratorAsync(Factory);
+
+        var page = await ReadTrainingsAsync(administrator, string.Empty);
+
+        var row = page.Items.Should().ContainSingle().Subject;
+
+        row.Id.Should().Be(trainingId);
+        row.TrainerId.Should().Be(profile.Id);
+        row.TrainerName.Should().Be($"{profile.Firstname} {profile.Lastname}");
+    }
+
+    /// <summary>
     /// A filter, is applied before the page rather than after it.
     /// </summary>
     /// <remarks>
