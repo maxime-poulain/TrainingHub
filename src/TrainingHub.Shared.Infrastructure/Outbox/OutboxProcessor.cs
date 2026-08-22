@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TrainingHub.Shared.Infrastructure.ThirdParty.EfCore;
 using TrainingHub.Shared.Infrastructure.ThirdParty.EfCore.Outbox;
 using Microsoft.EntityFrameworkCore;
@@ -62,6 +63,16 @@ OUTPUT inserted.*")
 
         foreach (var message in claimed.OrderBy(message => message.OccurredOnUtc).ThenBy(message => message.Id))
         {
+            // One delivery attempt, one root span of its own, linked to the trace that committed
+            // the fact — never its child: this attempt may run minutes and retries later, and the
+            // request that produced the fact has long answered (ADR 0097). Everything below,
+            // consumer spans and the outcome's save included, nests under it.
+            using var activity = OutboxTelemetry.StartDeliveryActivity($"Deliver {message.Name}", message.TraceParent);
+            activity?.SetTag(OutboxTelemetry.FactNameTag, message.Name);
+
+            var started = Stopwatch.GetTimestamp();
+            var fullyDelivered = false;
+
             try
             {
                 var fact = IntegrationEventSerializer.Deserialize(message.Name, message.Version, message.Payload);
@@ -81,6 +92,7 @@ OUTPUT inserted.*")
                 if (outcome.EveryConsumerSettled)
                 {
                     message.MarkProcessed(timeProvider.GetUtcNow().UtcDateTime);
+                    fullyDelivered = true;
                 }
                 else
                 {
@@ -98,13 +110,36 @@ OUTPUT inserted.*")
             {
                 // What reaches this catch never ran a consumer: a payload nobody can deserialize
                 // or a fact with no route fails before the dispatch loop starts, so there is no
-                // outcome to split and the whole message fails, exactly as before ADR 0034.
+                // outcome to split and the whole message fails, exactly as before ADR 0034. No
+                // consumer span exists to carry the cause, so the delivery span does — the one
+                // place this exception appears in the trace.
+                activity?.AddException(exception);
                 RecordFailure(message, exception.ToString(), exception, configured);
             }
 
             // Saved per message rather than per batch: an outcome, once known, survives whatever
             // the next message does to this process.
             await trainingContext.SaveChangesAsync(cancellationToken);
+
+            if (fullyDelivered)
+            {
+                activity?.SetTag(OutboxTelemetry.OutcomeTag, OutboxTelemetry.DeliveredOutcome);
+
+                // The business half of the metrics: every fact, counted once under its wire name
+                // at the moment its last consumer settled — which is why the counter lives here
+                // and not in any handler (ADR 0096).
+                OutboxTelemetry.FactsDelivered.Add(1, new KeyValuePair<string, object?>(OutboxTelemetry.FactNameTag, message.Name));
+            }
+            else
+            {
+                activity?.SetTag(OutboxTelemetry.OutcomeTag, OutboxTelemetry.FailedOutcome);
+                activity?.SetStatus(ActivityStatusCode.Error, "The attempt failed; the envelope records why.");
+            }
+
+            OutboxTelemetry.DeliveryDuration.Record(
+                Stopwatch.GetElapsedTime(started).TotalSeconds,
+                new KeyValuePair<string, object?>(OutboxTelemetry.FactNameTag, message.Name),
+                new KeyValuePair<string, object?>(OutboxTelemetry.OutcomeTag, fullyDelivered ? OutboxTelemetry.DeliveredOutcome : OutboxTelemetry.FailedOutcome));
         }
 
         return claimed.Count;
@@ -151,6 +186,11 @@ OUTPUT inserted.*")
 
         if (message.Attempts >= configured.MaxAttempts)
         {
+            // Counted at the same transition the log announces, and under the same fact name the
+            // other outbox instruments use: this is the alarm's metric, where the health probe's
+            // Degraded is its screen (ADR 0061, ADR 0096).
+            OutboxTelemetry.Poisoned.Add(1, new KeyValuePair<string, object?>(OutboxTelemetry.FactNameTag, message.Name));
+
             // Error, once, at the transition: this is the moment the system gives up on a
             // committed fact. It was the whole of the dead-letter surface until ADR 0061, and is
             // still the only half that reaches a log aggregator rather than a screen.

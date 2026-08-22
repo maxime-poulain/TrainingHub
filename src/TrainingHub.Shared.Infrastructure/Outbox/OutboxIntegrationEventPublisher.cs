@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TrainingHub.Shared.Application.IntegrationEvents;
 using TrainingHub.Shared.Infrastructure.ThirdParty.EfCore;
 using TrainingHub.Shared.Infrastructure.ThirdParty.EfCore.Outbox;
@@ -31,12 +32,17 @@ public sealed class OutboxIntegrationEventPublisher(TrainingContext trainingCont
 
         // A version-7 GUID: minted here rather than by the database because it is the delivery
         // ledger's deduplication key, and time-ordered so the clustered key follows insertion order.
+        // The current activity's identifier — the W3C traceparent, since the host runs under that
+        // format — rides along, so the delivery can link its own trace back to the operation that
+        // committed the fact. ASP.NET Core opens an activity for every request whether or not
+        // telemetry is on, which is why the stamp is not gated on anything (ADR 0097).
         var message = new OutboxMessage(
             Guid.CreateVersion7(),
             name,
             version,
             IntegrationEventSerializer.Serialize(integrationEvent),
-            timeProvider.GetUtcNow().UtcDateTime);
+            timeProvider.GetUtcNow().UtcDateTime,
+            Activity.Current?.Id);
 
         trainingContext.Set<OutboxMessage>().Add(message);
 

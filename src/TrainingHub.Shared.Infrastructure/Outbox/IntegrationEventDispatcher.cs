@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TrainingHub.Shared.Application.IntegrationEvents;
 
 namespace TrainingHub.Shared.Infrastructure.Outbox;
@@ -90,10 +91,16 @@ public sealed class IntegrationEventDispatcher(
                 continue;
             }
 
+            // One span per consumer, named by the ledger identity the outcome is settled under:
+            // the trace then shows exactly what the retry story is made of — which consumers
+            // settled, which one failed, and what the next attempt still owes (ADR 0097).
+            using var activity = OutboxTelemetry.Source.StartActivity(consumer.ConsumerName);
+
             try
             {
                 await consumer.HandleAsync(integrationEvent, cancellationToken);
                 delivered.Add(consumer.ConsumerName);
+                activity?.SetTag(OutboxTelemetry.OutcomeTag, OutboxTelemetry.DeliveredOutcome);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -101,6 +108,9 @@ public sealed class IntegrationEventDispatcher(
                 // neighbors still get the fact. Cancellation stays a shutdown, not an outcome —
                 // it propagates whole, and the pass it aborts re-runs, which is the at-least-once
                 // window the lease already implies.
+                activity?.SetTag(OutboxTelemetry.OutcomeTag, OutboxTelemetry.FailedOutcome);
+                activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+                activity?.AddException(exception);
                 failures.Add(new ConsumerFailure(consumer.ConsumerName, exception));
             }
         }

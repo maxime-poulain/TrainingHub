@@ -11,6 +11,15 @@
         <!-- This host is the BFF: it terminates authentication and forwards to the API. -->
         <PackageReference Include="Yarp.ReverseProxy"/>
         <PackageReference Include="System.IdentityModel.Tokens.Jwt"/>
+        <!-- The BFF's own telemetry corner, wired by its Telemetry extension alone — deliberately
+             not a reference to Shared.Api's seam, which would drag the backend into this host.
+             Without it every API trace would name a parent span no backend ever received, because
+             the proxy propagates the trace context whether or not anything records. See ADR 0095. -->
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"/>
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting"/>
+        <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore"/>
+        <PackageReference Include="OpenTelemetry.Instrumentation.Http"/>
+        <PackageReference Include="OpenTelemetry.Instrumentation.Runtime"/>
     </ItemGroup>
 
 </Project>

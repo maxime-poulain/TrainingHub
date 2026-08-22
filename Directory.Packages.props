@@ -148,6 +148,25 @@
       no entry: transitive pinning applies to packages declared here, not to every package resolved.
     -->
     <PackageVersion Include="NetArchTest.eNhancedEdition" Version="1.4.5" />
+    <!--
+      The telemetry pipeline of the three hosts, under Apache 2.0: the SDK with its hosting
+      integration, the OTLP exporter that carries all three signals over one wire, and the bridges
+      that subscribe to what the platform already emits — the request spans and meters ASP.NET Core
+      and HttpClient publish themselves, the runtime's counters, and SqlClient's command events.
+      Only TrainingHub.Shared.Api and the Blazor host reference any of these: custom
+      instrumentation everywhere else speaks the BCL's ActivitySource and Meter, which need no
+      package at all, and an architecture rule holds that line. Every entry here is the stable
+      1.18.0 train on purpose — the EF Core bridge has never shipped a stable version, so database
+      spans come from the SqlClient bridge and database metrics from EF Core's own built-in meter,
+      and the process bridge stays out for the same reason, the runtime one covering what matters.
+      See ADR 0095.
+    -->
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.18.0" />
     <PackageVersion Include="Respawn" Version="7.0.0" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.16.20" />
     <!--
@@ -158,6 +177,16 @@
       transitive pinning above keeps the rest coherent. See ADR 0026.
     -->
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <!--
+      The day ADR 0026 reserved: an aggregator exists now, so the two text sinks gain an OTLP
+      sibling. The official Serilog sink rather than forwarding through the provider bridge,
+      because it ships the rendered message, the structured properties and the enrichers' work —
+      the caller ADR 0027 stamps included — with the trace and span identifiers attached, which is
+      what makes a log line findable from the trace that produced it. Wired inside AddApiLogging
+      alone, like every other sink, and off with the same switch as the rest of the telemetry.
+      See ADR 0095.
+    -->
+    <PackageVersion Include="Serilog.Sinks.OpenTelemetry" Version="4.2.0" />
     <!--
       The imaging library, under MIT, and the one ADR 0021 named by name when it deferred this:
       ImageSharp was declined there because its license changes for commercial use above a revenue

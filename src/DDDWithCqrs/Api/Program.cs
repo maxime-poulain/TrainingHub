@@ -34,6 +34,11 @@ builder.Services.AddApiProblemDetails();
 // ApiLogging section. Declared in Shared.Api so neither host can quietly log less than the other.
 builder.Services.AddApiLogging(builder.Configuration);
 
+// One telemetry pipeline for both hosts: traces, metrics and logs over OTLP, tuned by the
+// Telemetry section and off entirely while it names no endpoint. This host adds the source its
+// pipeline behavior speaks from, so command and query spans are recorded too. See ADR 0095.
+builder.Services.AddApiTelemetry(builder.Configuration, builder.Environment, ApplicationTelemetry.ActivitySourceName);
+
 // One language policy for both hosts: Accept-Language against the supported set, English
 // otherwise. The BFF says the visitor's cookie choice through that same header. See ADR 0088.
 builder.Services.AddApiLocalization();
@@ -61,7 +66,9 @@ builder.Services.AddMediator(configuration =>
         typeof(MediatorCommandDispatcher).Assembly, // DDDWithCqrs.Infrastructure: query handlers
         typeof(PublishIntegrationEventWhenTrainerCreatedDomainEventHandler).Assembly // Shared.Application: domain event handlers
     ];
-    configuration.PipelineBehaviors = [typeof(ValidationPipelineBehavior<,>), typeof(NoTrackingDuringQueryExecutionBehavior<,>)];
+    // Telemetry first, so its span wraps validation and a rejected command counts as a failed
+    // command — the same statement ADR 0016 makes about the HTTP answer (ADR 0096).
+    configuration.PipelineBehaviors = [typeof(TelemetryPipelineBehavior<,>), typeof(ValidationPipelineBehavior<,>), typeof(NoTrackingDuringQueryExecutionBehavior<,>)];
     configuration.ServiceLifetime = ServiceLifetime.Transient;
 });
 

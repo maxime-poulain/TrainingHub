@@ -1,6 +1,6 @@
 # 0026 — Log with Serilog to console and files, through typed options
 
-- **Status:** Accepted
+- **Status:** Accepted — amended by [0095](0095-observe-every-host-with-opentelemetry-through-one-seam.md): the aggregator this record reserved a day for exists, and the two text sinks gain an OTLP sibling inside the same extension, on the telemetry endpoint's switch
 - **Date:** 2026-08-04
 
 ## Context

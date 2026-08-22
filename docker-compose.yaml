@@ -90,6 +90,29 @@ services:
       retries: 5
       start_period: 5s
 
+  # The telemetry backend the hosts export to: traces, metrics and structured logs, over OTLP.
+  # The Aspire Dashboard rather than a Grafana stack for the same reason Mailpit answers for mail —
+  # one container, no configuration files, a UI that shows everything a developer needs — and like
+  # Mailpit it keeps no volume: telemetry history belongs to a production deployment's backend,
+  # not to a machine that was only supposed to start. The hosts never depend on it, in the compose
+  # graph or anywhere else: the exporter is batched and background, and a dashboard that is down
+  # costs dropped batches and nothing more (ADR 0095).
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.4
+    container_name: aspire-dashboard
+    environment:
+      # A loopback port on a development machine: the dashboard's login-token dance would be
+      # friction with nothing behind it. Anything production-shaped runs its own backend.
+      - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
+    ports:
+      # The UI, and the OTLP gRPC ingress mapped onto the conventional 4317 so the committed
+      # Development settings can say http://localhost:4317.
+      - "18888:18888"
+      - "4317:18889"
+    # No healthcheck, and not from neglect: the image is shell-less like SeaweedFS's, so a
+    # CMD-SHELL probe could never start — and nothing waits on this container anyway, which is the
+    # point. `--wait` treats a check-less container as ready once it is running.
+
   ddd-api:
     # Behind the full profile, with the two other hosts: a bare `docker compose up` starts the
     # three dependencies alone, which is what a developer running the hosts from an IDE needs —
@@ -126,6 +149,9 @@ services:
       - PasswordReset__LinkBaseAddress=https://localhost:7068
       # Same reasoning for the verification link (ADR 0090).
       - EmailVerification__LinkBaseAddress=https://localhost:7068
+      # Service name and container port, not the host mapping: inside the network the dashboard
+      # is another host. Blank it to run this container with telemetry off (ADR 0095).
+      - Telemetry__OtlpEndpoint=http://aspire-dashboard:18889
     healthcheck:
       # Liveness, not readiness, on purpose: a container check drives restart decisions, and
       # restarting this process cannot fix a dependency /health/ready would report on. curl is
@@ -177,6 +203,7 @@ services:
       - Smtp__SenderName=TrainingHub
       - PasswordReset__LinkBaseAddress=https://localhost:7068
       - EmailVerification__LinkBaseAddress=https://localhost:7068
+      - Telemetry__OtlpEndpoint=http://aspire-dashboard:18889
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/live"]
       interval: 10s
@@ -219,6 +246,9 @@ services:
       # the machine's browser already trusts it and there is nothing to accept by hand.
       - ASPNETCORE_Kestrel__Certificates__Default__Path=/https/traininghub.pfx
       - ASPNETCORE_Kestrel__Certificates__Default__Password=Password@
+      # Service name and container port, like the API hosts above: inside the network the
+      # dashboard is another host (ADR 0095).
+      - Telemetry__OtlpEndpoint=http://aspire-dashboard:18889
       # No Turnstile pair, so the contact form runs without the challenge (ADR 0083) — the
       # honeypot and both rate windows still stand. Supplying Turnstile__SiteKey and
       # Turnstile__SecretKey together switches it on; verification is then a real HTTPS call to

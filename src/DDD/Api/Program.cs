@@ -33,6 +33,11 @@ builder.Services.AddApiProblemDetails();
 // ApiLogging section. Declared in Shared.Api so neither host can quietly log less than the other.
 builder.Services.AddApiLogging(builder.Configuration);
 
+// One telemetry pipeline for both hosts: traces, metrics and logs over OTLP, tuned by the
+// Telemetry section and off entirely while it names no endpoint. Declared in Shared.Api so
+// neither host can quietly observe less than the other. See ADR 0095.
+builder.Services.AddApiTelemetry(builder.Configuration, builder.Environment);
+
 // One language policy for both hosts: Accept-Language against the supported set, English
 // otherwise. The BFF says the visitor's cookie choice through that same header. See ADR 0088.
 builder.Services.AddApiLocalization();

@@ -22,6 +22,7 @@ two different problems.
 - [Persistence](#persistence)
 - [Security](#security)
 - [API reference](#api-reference)
+- [Observability](#observability)
 - [Tech stack](#tech-stack)
 - [Getting started](#getting-started)
 - [Testing](#testing)
@@ -1060,6 +1061,54 @@ restart, deliberately. See
 
 ---
 
+## Observability
+
+Every host exports traces, metrics and logs over OTLP, wired once in `Shared.Api`
+(`AddApiTelemetry`) and switched by one setting: a blank `Telemetry:OtlpEndpoint` registers no
+pipeline at all, which is what CI and the test suites run under. The BFF carries its own small
+counterpart, because the proxy propagates the W3C trace context to the API whether or not anything
+records — an untraced BFF would leave every API trace pointing at a parent span no backend ever
+received. Custom instrumentation everywhere speaks the BCL's `ActivitySource` and `Meter`; only
+the seam references OpenTelemetry, and an architecture rule keeps it there. See
+[ADR 0095](docs/adr/0095-observe-every-host-with-opentelemetry-through-one-seam.md).
+
+What travels is deliberate ([ADR 0096](docs/adr/0096-name-the-operation-once-and-bound-every-tag.md)):
+
+- **Traces.** The platform's request, dependency and SQL spans; a span per command and query on
+  the CQRS host, named by the message type and opened by one pipeline behavior ahead of
+  validation, so a rejected command counts as a failed command with its `error.code` — the
+  layered host's operations are its HTTP routes, deliberately. Health probes and the outbox's
+  empty polls are filtered out, so what remains is signal.
+- **Metrics.** `traininghub.*` duration histograms for commands, queries, outbox deliveries and
+  SMTP sends — each carrying count, failure rate and latency at once — a poison counter, and
+  `traininghub.facts.delivered` by wire name, which is the business surface: trainings created,
+  trainers suspended, verifications requested, read where every committed fact already passes.
+  Every tag comes from a set the code closes; no identifier, address or URL is ever a tag.
+- **Logs.** The same Serilog pipeline as ever (ADR 0026), with an OTLP sink beside the console
+  and the files: structured properties, the caller stamp of ADR 0027, and the trace identifiers
+  that make a log line findable from its span. Identity lives here and only here — spans and
+  metrics stay identity-free.
+
+The outbox carries the story across the asynchronous gap
+([ADR 0097](docs/adr/0097-link-the-delivery-to-the-trace-that-committed-the-fact.md)): each
+envelope stores the `traceparent` of the operation that committed it, and every delivery attempt
+is a new trace whose root span links back — never a child, because a retry minutes later is not
+part of a request that has long answered. Below the delivery root, one span per consumer shows
+what the ledger settled and what a retry still owes, with the SMTP send inside.
+
+To see it: `./scripts/start-dependencies.sh`, run a host, register a trainer and create a
+training, then open the Aspire Dashboard at <http://localhost:18888>. The request trace holds the
+command span and its SQL; the linked `Deliver TrainingCreated` trace holds the consumer spans and
+`SendEmail`; the message itself is in Mailpit at <http://localhost:8025>. Stop the
+`aspire-dashboard` container and create another training to see the failure behavior: the request
+answers exactly as before — telemetry is an observer here, never a dependency.
+
+Sampling is `Telemetry:TracesSampleRatio` through the standard parent-based ratio sampler — one
+in Development, a dial in production; spans continuing a sampled trace stay sampled, so a trace
+is always whole.
+
+---
+
 ## Tech stack
 
 | Package | Role |
@@ -1073,6 +1122,8 @@ restart, deliberately. See
 | `Microsoft.AspNetCore.OpenApi`, `Scalar.AspNetCore` | The OpenAPI document and its reference UI |
 | `MudBlazor` | Component library of the Blazor WebAssembly front end |
 | `Serilog.AspNetCore` | The API hosts' logging — console and rolling text files, tuned by the typed `ApiLogging` options ([ADR 0026](docs/adr/0026-log-with-serilog-to-console-and-files-through-typed-options.md)) |
+| `OpenTelemetry.Extensions.Hosting`, the OTLP exporter, and the ASP.NET Core, HttpClient, runtime and SqlClient bridges | The telemetry pipeline — traces and metrics over OTLP, wired by the one seam allowed to name the library, off while `Telemetry:OtlpEndpoint` is blank ([ADR 0095](docs/adr/0095-observe-every-host-with-opentelemetry-through-one-seam.md)) |
+| `Serilog.Sinks.OpenTelemetry` | The OTLP sibling of the two text sinks — log lines reach the aggregator with their properties, their caller stamp and the trace identifiers that make them findable from a span ([ADR 0095](docs/adr/0095-observe-every-host-with-opentelemetry-through-one-seam.md)) |
 | `AspNetCore.HealthChecks.UI`, `.UI.Client`, `.UI.InMemory.Storage` | The health dashboard at `/healthchecks-ui`, Development only — the probes it watches stay hand-rolled ([ADR 0037](docs/adr/0037-answer-for-the-hosts-health-at-two-endpoints.md)) |
 | `Yarp.ReverseProxy` | The BFF's proxy — forwards `/api` to the REST API and attaches the access token from the session cookie |
 | `bunit` | Renders a Blazor component in-process, so the profile page's client-side decisions are tested rather than only clicked |
@@ -1094,8 +1145,8 @@ without a version attribute, every version is exact, and transitive pinning is e
 ### Prerequisites
 
 - **.NET SDK 10**
-- **Docker** — for SQL Server, the object store and the mail server, for the three application
-  images, and required by the integration tests
+- **Docker** — for SQL Server, the object store, the mail server and the telemetry dashboard, for
+  the three application images, and required by the integration tests
 - **A TLS certificate for the BFF container** — only when running the whole stack in containers
   (the full profile below); the dependencies-only workflow needs none. Exported once from the
   certificate the SDK already installed on this machine:
@@ -1124,7 +1175,7 @@ without a version attribute, every version is exact, and transitive pinning is e
 ```
 
 This is the daily command, and it is the bare compose up on purpose: the three host services sit
-behind the `full` profile, so what starts is the three dependencies alone — no image is built and
+behind the `full` profile, so what starts is the four dependencies alone — no image is built and
 no application container is created ([ADR 0075](docs/adr/0075-give-the-bare-compose-up-to-the-developer.md)).
 The script adds `--wait`, so it returns only once every healthcheck has passed, and prints where
 each dependency listens:
@@ -1134,13 +1185,17 @@ each dependency listens:
 | SQL Server 2022 | `sqlserver` | `1433` (`sa` / `Password@`) |
 | SeaweedFS, the object store photos live in | `seaweedfs` | `8333` (S3), `9333` (the master's own UI) |
 | Mailpit, the mail sink | `mailpit` | `1025` (SMTP), `8025` (web UI and HTTP API) |
+| The Aspire Dashboard, the telemetry sink | `aspire-dashboard` | `4317` (OTLP), `18888` (web UI) |
 
 The hosts are then run from an IDE or `dotnet run` (below) and reach the containers over those
 ports — every `appsettings.Development.json` already points at `localhost`. To check the
-dependencies by hand: `docker compose ps` shows all three `healthy`, every email the hosts send is
-readable at <http://localhost:8025>, and the store's own view is <http://localhost:9333>. Stopping
-them is `docker compose down`; the SQL Server and SeaweedFS volumes survive it, so the data is
-still there on the next start.
+dependencies by hand: `docker compose ps` shows every checked dependency `healthy` (the telemetry
+dashboard carries no probe — its image is shell-less, and nothing waits on it anyway), every email
+the hosts send is readable at <http://localhost:8025>, the store's own view is
+<http://localhost:9333>, and the telemetry lands at <http://localhost:18888>. Stopping them is
+`docker compose down`; the SQL Server and SeaweedFS volumes survive it, so the data is still there
+on the next start. Mailpit and the dashboard forget on restart, deliberately: a sink that empties
+itself is a feature in both cases.
 
 SeaweedFS rather than MinIO, whose community repository was archived in April 2026 and publishes
 no binaries; both speak S3, and the API talks to whichever through `AWSSDK.S3`, so the provider is
@@ -1154,12 +1209,12 @@ four configuration values rather than a rewrite. The bucket is created at startu
 docker compose --profile full up -d --build
 ```
 
-Same three dependencies, plus an image per host: the layered API on <http://localhost:5085>, the
+Same four dependencies, plus an image per host: the layered API on <http://localhost:5085>, the
 CQRS API on <http://localhost:5086>, and the BFF — the one a browser opens — on
-<https://localhost:7068>. Six containers, and each answers for itself: since ADR 0037 the compose
-file polls every one of them, so `docker compose ps` shows `healthy` rather than merely running.
-This is the profile that needs the TLS certificate from the prerequisites, because the BFF runs in
-a container here.
+<https://localhost:7068>. Seven containers, and each checked one answers for itself: since
+ADR 0037 the compose file polls the dependencies and the hosts alike, so `docker compose ps`
+shows `healthy` rather than merely running. This is the profile that needs the TLS certificate
+from the prerequisites, because the BFF runs in a container here.
 
 Two things are worth knowing before the first run. The CQRS host waits for the layered one rather
 than starting beside it, because in `Development` both apply their migrations at startup against one
@@ -1219,6 +1274,7 @@ Each API expects:
 | `Smtp:Host`, `Smtp:Port`, `Smtp:SenderAddress` | The mail server the outbox consumers deliver through, and the identity messages are sent as. All three **fail fast at startup** when missing ([ADR 0031](docs/adr/0031-send-email-over-smtp-and-prove-it-against-a-real-server.md)) |
 | `Smtp:SenderName`, `Smtp:Username`, `Smtp:Password`, `Smtp:UseStartTls` | Optional: a display name, credentials for a relay that wants them (they travel as a pair or not at all), and STARTTLS for one reached across a real network. The local Mailpit container needs none of them |
 | `ApiLogging:*` | The Serilog pipeline both hosts share: `Path`, `RollingInterval`, `RetainedFileCountLimit`, `MinimumLevel`, `LevelOverrides`, `WriteToFile`. Every key has a working default — a host with no section logs to the console and to daily files under `logs/` ([ADR 0026](docs/adr/0026-log-with-serilog-to-console-and-files-through-typed-options.md)) |
+| `Telemetry:OtlpEndpoint`, `Telemetry:TracesSampleRatio` | Where the OTLP exporter sends — the committed Development value names the local dashboard, and blank or absent turns telemetry off entirely, which is the default everywhere else — and the fraction of new traces sampled, one by default. A wrong value **fails fast at startup** even while telemetry is off. The BFF reads the same section ([ADR 0095](docs/adr/0095-observe-every-host-with-opentelemetry-through-one-seam.md)) |
 | `Outbox:*` | How eagerly each host's delivery worker drains the outbox, and how patiently it retries: `PollInterval`, `BatchSize`, `MaxAttempts`, `LeaseDuration`, `RetryDelay` — the base of the doubling schedule a failed attempt books its next try on — and `RetentionPeriod`, past which delivered rows are swept while poison stays for the operator. Every knob has a working default (5 s, 20, 5 attempts, 30 s, 30 s, 14 days) and all fail fast at startup when non-positive ([ADR 0025](docs/adr/0025-deliver-the-outbox-with-a-hosted-service-in-each-host.md), [ADR 0033](docs/adr/0033-back-off-between-retries-log-the-poison-and-sweep-the-delivered-history.md)) |
 | `Turnstile:SiteKey`, `Turnstile:SecretKey` | The BFF's Cloudflare Turnstile pair, guarding the contact form ([ADR 0083](docs/adr/0083-ask-the-visitor-for-proof-where-their-address-is-real.md)). Optional, and they travel as a pair or not at all: both absent — the default everywhere — runs the form without the challenge, and half a pair **fails fast at startup**. A deployment that wants the challenge creates its pair in a free Cloudflare account and supplies both keys together — `appsettings.Local.json` for a developer, environment variables for a container — and verification is then a real HTTPS call to `challenges.cloudflare.com` |
 | `PasswordReset:LinkBaseAddress` | The public origin the emailed reset link is built on — the BFF's address as a browser reaches it, which the API cannot derive from anything it knows about itself ([ADR 0084](docs/adr/0084-reset-a-forgotten-password-with-a-credential-the-database-cannot-leak.md)). Required, checked whole at startup: the committed Development value names the BFF run from an IDE, and the compose file overrides it for the containerized stack |

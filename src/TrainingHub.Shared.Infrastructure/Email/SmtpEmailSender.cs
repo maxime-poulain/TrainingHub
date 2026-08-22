@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
@@ -16,9 +17,10 @@ namespace TrainingHub.Shared.Infrastructure.Email;
 /// relay in production without a line changing. Each send opens its own connection: the client is
 /// not safe to share, this singleton serves both hosts' outbox workers, and the volume — one
 /// message per trainer-lifecycle fact, dispatched sequentially — buys nothing from a pooled
-/// connection that would need liveness checks and a lock. A failed send is not caught here either:
-/// the outbox processor records the exception on the envelope and retries within its budget, which
-/// is the retry policy this adapter would otherwise duplicate.
+/// connection that would need liveness checks and a lock. A failed send is caught only long
+/// enough to mark the span it failed inside, then propagates whole: the outbox processor records
+/// the exception on the envelope and retries within its budget, which is the retry policy this
+/// adapter would otherwise duplicate.
 /// </remarks>
 public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSender
 {
@@ -29,6 +31,37 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
     {
         ArgumentNullException.ThrowIfNull(message);
 
+        // One span for the whole SMTP conversation — the external dependency a notice waits on.
+        // It deliberately carries no recipient, subject or body: which notice this is, the
+        // consumer span above already says, and the rest is personal data (ADR 0096). A failure
+        // still propagates whole — the outbox owns the retry — but leaves as a marked span first.
+        using var activity = EmailTelemetry.Source.StartActivity("SendEmail");
+        var started = Stopwatch.GetTimestamp();
+
+        try
+        {
+            await DeliverAsync(message, cancellationToken);
+
+            activity?.SetTag(EmailTelemetry.OutcomeTag, EmailTelemetry.SentOutcome);
+            EmailTelemetry.SendDuration.Record(
+                Stopwatch.GetElapsedTime(started).TotalSeconds,
+                new KeyValuePair<string, object?>(EmailTelemetry.OutcomeTag, EmailTelemetry.SentOutcome));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            activity?.SetTag(EmailTelemetry.OutcomeTag, EmailTelemetry.FailedOutcome);
+            activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+            activity?.AddException(exception);
+            EmailTelemetry.SendDuration.Record(
+                Stopwatch.GetElapsedTime(started).TotalSeconds,
+                new KeyValuePair<string, object?>(EmailTelemetry.OutcomeTag, EmailTelemetry.FailedOutcome));
+
+            throw;
+        }
+    }
+
+    private async Task DeliverAsync(EmailMessage message, CancellationToken cancellationToken)
+    {
         var mime = new MimeMessage();
         mime.From.Add(new MailboxAddress(_options.SenderName, _options.SenderAddress));
         mime.To.Add(MailboxAddress.Parse(message.Recipient));

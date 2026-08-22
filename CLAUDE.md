@@ -7,9 +7,9 @@ outrank shipping speed. Understand the existing design before changing it.
 ## Read first, in this order
 
 1. `README.md` — the architecture, the domain model, the conventions.
-2. `docs/adr/README.md` — the index of 94 architecture decision records.
+2. `docs/adr/README.md` — the index of 97 architecture decision records.
 3. The records relevant to what you are touching.
-4. `tests/TrainingHub.Architecture.Tests/` — the same decisions as 237 executable rules. Often
+4. `tests/TrainingHub.Architecture.Tests/` — the same decisions as 242 executable rules. Often
    faster than reading prose: each rule names the record it defends and quotes it.
 5. The existing implementation.
 
@@ -23,13 +23,14 @@ dotnet build TrainingHub.slnx --configuration Release          # zero warnings, 
 dotnet test  TrainingHub.slnx --filter "FullyQualifiedName!~IntegrationTests"   # no Docker needed
 dotnet test  TrainingHub.slnx                                  # everything; needs Docker
 ./scripts/generate-clients.sh                                  # after any change to the API surface
-./scripts/start-dependencies.sh                                # the 3 dependencies alone; hosts run from the IDE
-docker compose --profile full up -d --build                    # the whole stack: 3 dependencies, 3 hosts
+./scripts/start-dependencies.sh                                # the 4 dependencies alone; hosts run from the IDE
+docker compose --profile full up -d --build                    # the whole stack: 4 dependencies, 3 hosts
 ```
 
 The bare `docker compose up` is the developer's command: the three host services sit behind the
-`full` profile, so it starts SQL Server, SeaweedFS and Mailpit alone and builds nothing (ADR 0075).
-The full profile builds an image per host and starts all six containers (ADR 0065). The BFF
+`full` profile, so it starts SQL Server, SeaweedFS, Mailpit and the Aspire Dashboard alone and
+builds nothing (ADR 0075). The full profile builds an image per host and starts all seven
+containers (ADR 0065). The BFF
 container needs the developer's TLS certificate at `docker/https/traininghub.pfx` — one
 `dotnet dev-certs` command, in the README — because its session cookie is `__Host-` prefixed and a
 browser stores none over plain HTTP. Named here because the container fails to start without it;
@@ -205,6 +206,32 @@ repository a named question and maps the aggregates.
   file asks of a localizer must exist in its family's neutral file
   (`EveryKeyAScreenAsks_ExistsInItsFamily`) — mistype `L["FirstName"]` and the build goes red
   naming the file, the family and the key.
+
+## Observability
+
+- **Only the telemetry seam touches OpenTelemetry** (`OnlyTheTelemetrySeam_TouchesOpenTelemetry`,
+  ADR 0095): `AddApiTelemetry` in `Shared.Api`, called by both API hosts
+  (`BothApiHosts_ConfigureTheSameTelemetry`), plus the BFF's own small `Telemetry/` corner.
+  Custom instrumentation everywhere else speaks the BCL's `ActivitySource` and `Meter` — no
+  package, ever, in an inner layer (`TheInnerCircle_CarriesNoTelemetryPackage`).
+- The `Telemetry:OtlpEndpoint` setting is the switch: blank means nothing is registered at all,
+  which is what CI and the test factories run under. It is a `string`, not a `Uri`, so a blank
+  override stays recognizably blank.
+- **The names are a contract** (`TheInstrumentationNames_AreTheRecordedOnes`, ADR 0096): sources
+  `TrainingHub.Application` / `TrainingHub.Outbox` / `TrainingHub.Email`; span names are the
+  message type names; metrics are `traininghub.*` histograms plus the poison counter and
+  `traininghub.facts.delivered` — dashboards query these strings, so renaming one is a decision,
+  not a refactoring.
+- **Every metric tag comes from a set the code closes** — message names, the registered fact
+  names, consumer names, three outcomes, the error-code vocabulary. Never an entity identifier,
+  an address, a URL or a request id; failed operations carry `error.code`, never the localized
+  sentence. Identity stays on the log line (ADR 0027), which now carries the trace id to join on.
+- Command and query telemetry is the CQRS host's `TelemetryPipelineBehavior`, first in the
+  pipeline; handlers carry none. Domain event handlers get no spans — they run inside the
+  command's own span. The layered stack is observable through its HTTP spans, deliberately.
+- The outbox envelope stores its producer's `traceparent`
+  (`TheOutboxEnvelope_CarriesItsProducersTraceContext`, ADR 0097); every delivery attempt is a new
+  root span linked back to it — never a child.
 
 ## C# style
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -69,6 +70,31 @@ public abstract class OutboxTest<TFactory>(TFactory factory) : IntegrationTest<T
         fact.ContactEmail.Should().Be(request.Email);
         fact.Firstname.Should().Be(request.Firstname);
         fact.Lastname.Should().Be(request.Lastname);
+    }
+
+    /// <summary>
+    /// Registering a trainer, stamps the committing trace, on the envelope.
+    /// </summary>
+    [Fact]
+    public async Task RegisteringATrainer_StampsTheCommittingTrace_OnTheEnvelope()
+    {
+        var request = AuthHelper.CreateUniqueRegisterRequest();
+
+        var response = await AuthHelper.RegisterAsync(Factory.CreateClient(), request);
+        response.EnsureSuccessStatusCode();
+
+        using var scope = Factory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<TrainingContext>();
+
+        var message = (await context.Set<OutboxMessage>().ToListAsync())
+            .Should().ContainSingle(m => m.Name == "TrainerCreated").Subject;
+
+        // ASP.NET Core opens an activity for every request whether or not anything is exporting —
+        // this suite runs with the endpoint blanked — so the stamp exists here too, and it parses
+        // as the W3C context the delivery's own trace will link back to (ADR 0097).
+        message.TraceParent.Should().NotBeNull();
+        ActivityContext.TryParse(message.TraceParent, null, out _).Should().BeTrue(
+            "the envelope's trace context is what the delivery span links back to");
     }
 
     /// <summary>

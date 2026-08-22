@@ -39,6 +39,12 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
         builder.Property(message => message.Payload)
             .IsRequired();
 
+        // A W3C traceparent is exactly fifty-five characters — two-digit version, dash,
+        // thirty-two-digit trace id, dash, sixteen-digit span id, dash, two-digit flags — and
+        // the column says so rather than defaulting to max (ADR 0097).
+        builder.Property(message => message.TraceParent)
+            .HasMaxLength(55);
+
         builder.Property(message => message.Attempts)
             .IsRequired();
 

@@ -3,10 +3,13 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Serilog;
+using Serilog.Sinks.OpenTelemetry;
 using TrainingHub.Shared.Api.Logging;
+using TrainingHub.Shared.Api.Telemetry;
 
 namespace TrainingHub.Shared.Api.Extensions;
 
@@ -100,6 +103,31 @@ public static class LoggingExtensions
                         formatProvider: CultureInfo.InvariantCulture,
                         rollingInterval: options.RollingInterval,
                         retainedFileCountLimit: options.RetainedFileCountLimit);
+                }
+
+                // The OTLP sibling of the two text sinks — the day ADR 0026 reserved, arrived
+                // with ADR 0095. On the same switch as the rest of the telemetry, and stamped
+                // with the same service name, so a log line and the span it was written under
+                // meet in the aggregator: this sink ships the structured properties and the
+                // enrichers' work — the caller included — with the trace and span identifiers
+                // attached, which the text template never carries.
+                var otlpEndpoint = configuration
+                    .GetSection(TelemetryOptions.SectionName)[nameof(TelemetryOptions.OtlpEndpoint)];
+
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint) && !OpenApiDocumentGeneration.IsInProgress())
+                {
+                    var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+
+                    loggerConfiguration.WriteTo.OpenTelemetry(sink =>
+                    {
+                        sink.Endpoint = otlpEndpoint;
+                        sink.Protocol = OtlpProtocol.Grpc;
+                        sink.ResourceAttributes = new Dictionary<string, object>
+                        {
+                            ["service.name"] = environment.ApplicationName,
+                            ["deployment.environment.name"] = environment.EnvironmentName,
+                        };
+                    });
                 }
             },
             writeToProviders: true);

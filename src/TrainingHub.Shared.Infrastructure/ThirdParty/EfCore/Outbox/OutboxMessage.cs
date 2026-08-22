@@ -31,13 +31,17 @@ public sealed class OutboxMessage
     /// <param name="version">The version of that wire name.</param>
     /// <param name="payload">The event, serialized as JSON.</param>
     /// <param name="occurredOnUtc">When the fact was recorded, in UTC.</param>
-    public OutboxMessage(Guid id, string name, int version, string payload, DateTime occurredOnUtc)
+    /// <param name="traceParent">
+    /// The W3C trace context of the operation that committed the fact, if one was being traced.
+    /// </param>
+    public OutboxMessage(Guid id, string name, int version, string payload, DateTime occurredOnUtc, string? traceParent = null)
     {
         Id = id;
         Name = name;
         Version = version;
         Payload = payload;
         OccurredOnUtc = occurredOnUtc;
+        TraceParent = traceParent;
     }
 
     // EF Core materializes rows through this constructor; the public one is for the publisher.
@@ -61,6 +65,13 @@ public sealed class OutboxMessage
 
     /// <summary>When the fact was recorded, in UTC — the order the worker delivers in.</summary>
     public DateTime OccurredOnUtc { get; }
+
+    /// <summary>
+    /// The W3C <c>traceparent</c> of the operation that committed the fact;
+    /// <see langword="null"/> when nothing was being traced. The delivery links its own trace
+    /// back to this one — a pointer to telemetry, never telemetry itself (ADR 0097).
+    /// </summary>
+    public string? TraceParent { get; }
 
     /// <summary>When the worker delivered the message; <see langword="null"/> while it is owed.</summary>
     public DateTime? ProcessedOnUtc { get; private set; }

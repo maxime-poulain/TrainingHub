@@ -6,6 +6,7 @@ using TrainingHub.Blazor.Client.Authorization;
 using TrainingHub.Blazor.Client.Infrastructure;
 using TrainingHub.Blazor.Components;
 using TrainingHub.Blazor.Prerendering;
+using TrainingHub.Blazor.Telemetry;
 using TrainingHub.GeneratedClients;
 using TrainingHub.Translations;
 
@@ -16,6 +17,11 @@ var builder = WebApplication.CreateBuilder(args);
 // own, so this host is the only Blazor-side place an override — the API base address, say — can
 // live. See ADR 0035.
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
+// Traces, metrics and logs over OTLP, off entirely while the Telemetry section names no endpoint.
+// The BFF's own counterpart of the API hosts' seam — see the extension for why this host must be
+// traced for any trace to be whole (ADR 0095).
+builder.Services.AddBffTelemetry(builder.Configuration, builder.Environment);
 
 // Add MudBlazor services
 builder.Services.AddMudServices();

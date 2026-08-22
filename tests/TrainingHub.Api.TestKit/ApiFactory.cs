@@ -285,6 +285,12 @@ public abstract class ApiFactory<TEntryPoint>
         // cause stays in a stream nobody reads.
         builder.ConfigureLogging(logging => logging.AddProvider(new RecordingLoggerProvider(_serverErrors)));
 
+        // The Development file names the local dashboard's OTLP endpoint, and this factory runs
+        // under Development; blanked so no suite ever opens an exporter toward a collector that
+        // is not there. Blank is the off switch the option documents — which is why it is a
+        // string and not a Uri. See ADR 0095.
+        builder.UseSetting("Telemetry:OtlpEndpoint", "");
+
         builder.UseEnvironment("Development");
     }
 

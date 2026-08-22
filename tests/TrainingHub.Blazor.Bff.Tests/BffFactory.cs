@@ -59,6 +59,11 @@ public sealed class BffFactory(
     {
         builder.UseEnvironment("Development");
 
+        // The Development file names the local dashboard's OTLP endpoint, and this factory runs
+        // under Development; blanked so the suite never opens an exporter toward a collector that
+        // is not there — the same neutralization ApiFactory carries. See ADR 0095.
+        builder.UseSetting("Telemetry:OtlpEndpoint", "");
+
         // The suite must behave the same on every machine: a developer's local overrides file,
         // loaded last by the host, is removed rather than out-shouted. See ADR 0035.
         builder.ConfigureAppConfiguration((_, configuration) =>

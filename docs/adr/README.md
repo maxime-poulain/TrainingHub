@@ -53,7 +53,7 @@ simpler from the outside.
 | [0023](0023-document-the-strategic-design-and-hold-it-to-the-model.md) | Document the strategic design, and hold it to the model | Accepted |
 | [0024](0024-publish-facts-not-intents-and-version-them-in-the-envelope.md) | Publish facts, not intents, and version them in the envelope | Accepted — the email half of "the ports remain fakes" is dated by 0031; the search half stays true; the retry contract gains its schedule in 0033; the per-consumer half of its at-least-once promise is made true by 0034 |
 | [0025](0025-deliver-the-outbox-with-a-hosted-service-in-each-host.md) | Deliver the outbox with a hosted service in each host | Accepted — the email half of "they remain fakes" is dated by 0031; the search half stays true; the retry cadence, the poison's silence and the table's growth are hardened by 0033; delivery is settled per consumer by 0034; the dead-letter surface it deferred is built by 0061 |
-| [0026](0026-log-with-serilog-to-console-and-files-through-typed-options.md) | Log with Serilog to console and files, through typed options | Accepted |
+| [0026](0026-log-with-serilog-to-console-and-files-through-typed-options.md) | Log with Serilog to console and files, through typed options | Accepted — amended by [0095](0095-observe-every-host-with-opentelemetry-through-one-seam.md): the aggregator this record reserved a day for exists, and the two text sinks gain an OTLP sibling inside the same extension, on the telemetry endpoint's switch |
 | [0027](0027-stamp-the-callers-identity-on-every-log-line.md) | Stamp the caller's identity on every log line | Accepted |
 | [0028](0028-a-specification-names-a-business-rule-or-it-does-not-exist.md) | A specification names a business rule, or it does not exist | Accepted — amended by [0055](0055-let-the-administration-read-what-the-catalogue-may-not.md): a named question may carry named criteria, and the line this record drew at none moves to *never a predicate* |
 | [0029](0029-answer-a-list-the-same-way-on-both-hosts.md) | Answer a list the same way on both hosts | Accepted — amended by 0071: the shared list contract gains a sort parameter — the same closed set of orders on both hosts |
@@ -122,3 +122,6 @@ simpler from the outside.
 | [0092](0092-hold-a-documents-claims-of-absence-to-the-code.md) | Hold a document's claims of absence to the code | Accepted |
 | [0093](0093-let-the-keyboard-finish-what-the-form-starts.md) | Let the keyboard finish what the form starts | Accepted |
 | [0094](0094-read-the-catalog-from-a-snapshot.md) | Read the catalog from a snapshot | Accepted |
+| [0095](0095-observe-every-host-with-opentelemetry-through-one-seam.md) | Observe every host with OpenTelemetry, through one seam | Accepted |
+| [0096](0096-name-the-operation-once-and-bound-every-tag.md) | Name the operation once, and bound every tag | Accepted |
+| [0097](0097-link-the-delivery-to-the-trace-that-committed-the-fact.md) | Link the delivery to the trace that committed the fact | Accepted |
